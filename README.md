@@ -6,13 +6,7 @@
 
 Customizes the default [pi](https://github.com/badlogic/pi-mono) editor with a powerline-style status bar, welcome overlay, and AI-generated "vibes" for loading messages. Inspired by [Powerlevel10k](https://github.com/romkatv/powerlevel10k) and [oh-my-pi](https://github.com/can1357/oh-my-pi).
 
-<img width="1261" height="817" alt="Image" src="https://github.com/user-attachments/assets/4cc43320-3fb8-4503-b857-69dffa7028f2" />
-
 ## Features
-
-**Working Vibes** — AI-generated themed loading messages. Set `/vibe star trek` and your "Working..." becomes "Running diagnostics..." or "Engaging warp drive...". Supports any theme: pirate, zen, noir, cowboy, etc.
-
-**Welcome overlay** — Branded splash screen shown as centered overlay on startup. Shows gradient logo, model info, keyboard tips, loaded AGENTS.md/extensions/skills/templates counts, and recent sessions. Auto-dismisses after 30 seconds or on any key press.
 
 **Rounded box design** — Status renders directly in the editor's top border, not as a separate footer.
 
@@ -29,7 +23,7 @@ Customizes the default [pi](https://github.com/badlogic/pi-mono) editor with a p
 ## Installation
 
 ```bash
-pi install npm:pi-powerline-footer
+pi install https://github.com/vinzloh/pi-powerline-footer
 ```
 
 Restart pi to activate.
@@ -48,73 +42,6 @@ Activates automatically. Toggle with `/powerline`, switch presets with `/powerli
 | `ascii` | Safe for any terminal |
 
 **Environment:** `POWERLINE_NERD_FONTS=1` to force Nerd Fonts, `=0` for ASCII.
-
-## Working Vibes
-
-Transform boring "Working..." messages into themed phrases that match your style:
-
-```
-/vibe star trek    → "Running diagnostics...", "Engaging warp drive..."
-/vibe pirate       → "Hoisting the sails...", "Charting course..."
-/vibe zen          → "Breathing deeply...", "Finding balance..."
-/vibe noir         → "Following the trail...", "Checking the angles..."
-/vibe              → Shows current theme, mode, and model
-/vibe off          → Disables (back to "Working...")
-/vibe model        → Shows current model
-/vibe model openai/gpt-4o-mini → Use a different model
-/vibe mode         → Shows current mode (generate or file)
-/vibe mode file    → Switch to file-based mode (instant, no API calls)
-/vibe mode generate → Switch to on-demand generation (contextual)
-/vibe generate mafia 200 → Pre-generate 200 vibes and save to file
-```
-
-### Configuration
-
-In `~/.pi/agent/settings.json`:
-
-```json
-{
-  "workingVibe": "star trek",                              // Theme phrase
-  "workingVibeMode": "generate",                           // "generate" (on-demand) or "file" (pre-generated)
-  "workingVibeModel": "anthropic/claude-haiku-4-5",        // Optional: model to use (default)
-  "workingVibeFallback": "Working",                        // Optional: fallback message
-  "workingVibeRefreshInterval": 30,                        // Optional: seconds between refreshes (default 30)
-  "workingVibePrompt": "Generate a {theme} loading message for: {task}",  // Optional: custom prompt template
-  "workingVibeMaxLength": 65                         // Optional: max message length (default 65)
-}
-```
-
-### Modes
-
-| Mode | Description | Pros | Cons |
-|------|-------------|------|------|
-| `generate` | On-demand AI generation (default) | Contextual, hints at actual task | ~$0.000015/msg, 500ms latency |
-| `file` | Pull from pre-generated file | Instant, zero cost, works offline | Not contextual |
-
-**File mode setup:**
-```bash
-/vibe generate mafia 200    # Generate 200 vibes, save to ~/.pi/agent/vibes/mafia.txt
-/vibe mode file             # Switch to file mode
-/vibe mafia                 # Now uses the file
-```
-
-**How file mode works:**
-1. Vibes are loaded from `~/.pi/agent/vibes/{theme}.txt` into memory
-2. Uses seeded shuffle (Mulberry32 PRNG) — cycles through all vibes before repeating
-3. New seed each session — different order every time you restart pi
-4. Zero latency, zero cost, works offline
-
-**Prompt template variables (generate mode only):**
-- `{theme}` — the current vibe theme (e.g., "star trek", "mafia")
-- `{task}` — context hint (user prompt initially, then agent's response text or tool info on refresh)
-- `{exclude}` — recent vibes to avoid (auto-populated, e.g., "Don't use: vibe1, vibe2...")
-
-**How it works:**
-1. When you send a message, shows "Channeling {theme}..." placeholder
-2. AI generates a themed message in the background (3s timeout)
-3. Message updates to the themed version (e.g., "Engaging warp drive...")
-4. During long tasks, refreshes on tool calls (rate-limited, default 30s)
-5. Cost: ~$0.000015 per generation (60 tokens @ haiku pricing)
 
 ## Thinking Level Display
 
@@ -185,6 +112,7 @@ Create `~/.pi/agent/extensions/powerline-footer/theme.json`:
 ```
 
 Colors can be:
+
 - **Theme color names**: `accent`, `primary`, `muted`, `dim`, `text`, `success`, `warning`, `error`, `borderMuted`
 - **Hex colors**: `#ff5500`, `#d787af`
 

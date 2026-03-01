@@ -10,7 +10,7 @@ import { getSeparator } from "./separators.js";
 import { renderSegment } from "./segments.js";
 import { getGitStatus, invalidateGitStatus, invalidateGitBranch } from "./git-status.js";
 import { ansi, getFgAnsiCode } from "./colors.js";
-import { WelcomeComponent, WelcomeHeader, discoverLoadedCounts, getRecentSessions } from "./welcome.js";
+
 import { getDefaultColors } from "./theme.js";
 import { 
   initVibeManager, 
@@ -40,21 +40,6 @@ interface PowerlineConfig {
 let config: PowerlineConfig = {
   preset: "default",
 };
-
-// Check if quietStartup is enabled in settings
-function isQuietStartup(): boolean {
-  const homeDir = process.env.HOME || process.env.USERPROFILE || "";
-  const settingsPath = join(homeDir, ".pi", "agent", "settings.json");
-  
-  try {
-    if (existsSync(settingsPath)) {
-      const settings = JSON.parse(readFileSync(settingsPath, "utf-8"));
-      return settings.quietStartup === true;
-    }
-  } catch {}
-  
-  return false;
-}
 
 // Read showLastPrompt setting (default: true) - called once at session start
 function readShowLastPromptSetting(): boolean {
@@ -183,9 +168,6 @@ export default function powerlineFooter(pi: ExtensionAPI) {
   let getThinkingLevelFn: (() => string) | null = null;
   let isStreaming = false;
   let tuiRef: any = null; // Store TUI reference for forcing re-renders
-  let dismissWelcomeOverlay: (() => void) | null = null; // Callback to dismiss welcome overlay
-  let welcomeHeaderActive = false; // Track if welcome header should be cleared on first input
-  let welcomeOverlayShouldDismiss = false; // Track early dismissal request (before overlay setup completes)
   let lastUserPrompt = ""; // Track last user message for "what did I type?" reminder
   let showLastPrompt = true; // Cached setting for last prompt visibility
   
@@ -201,23 +183,17 @@ export default function powerlineFooter(pi: ExtensionAPI) {
     lastUserPrompt = "";
     isStreaming = false;
     showLastPrompt = readShowLastPromptSetting();
-    
+
     // Store thinking level getter if available
     if (typeof ctx.getThinkingLevel === 'function') {
       getThinkingLevelFn = () => ctx.getThinkingLevel();
     }
-    
+
     // Initialize vibe manager (needs modelRegistry from ctx)
     initVibeManager(ctx);
-    
+
     if (enabled && ctx.hasUI) {
       setupCustomEditor(ctx);
-      // quietStartup: true → compact header, otherwise → full overlay
-      if (isQuietStartup()) {
-        setupWelcomeHeader(ctx);
-      } else {
-        setupWelcomeOverlay(ctx);
-      }
     }
   });
 
@@ -274,16 +250,13 @@ export default function powerlineFooter(pi: ExtensionAPI) {
   });
 
   // Track streaming state (footer only shows status during streaming)
-  // Also dismiss welcome when agent starts responding (handles `p "command"` case)
   pi.on("agent_start", async (_event, ctx) => {
     isStreaming = true;
     onVibeAgentStart();
-    dismissWelcome(ctx);
   });
 
-  // Also dismiss on tool calls (agent is working) + refresh vibe if rate limit allows
+  // Refresh vibe on tool calls if rate limit allows
   pi.on("tool_call", async (event, ctx) => {
-    dismissWelcome(ctx);
     if (ctx.hasUI) {
       // Extract recent agent context from session for richer vibe generation
       const agentContext = getRecentAgentContext(ctx);
@@ -317,31 +290,11 @@ export default function powerlineFooter(pi: ExtensionAPI) {
     return undefined;
   }
 
-  // Helper to dismiss welcome overlay/header
-  function dismissWelcome(ctx: any) {
-    if (dismissWelcomeOverlay) {
-      dismissWelcomeOverlay();
-      dismissWelcomeOverlay = null;
-    } else {
-      // Overlay not set up yet (100ms delay) - mark for immediate dismissal when it does
-      welcomeOverlayShouldDismiss = true;
-    }
-    if (welcomeHeaderActive) {
-      welcomeHeaderActive = false;
-      ctx.ui.setHeader(undefined);
-    }
-  }
-
   pi.on("agent_end", async (_event, ctx) => {
     isStreaming = false;
     if (ctx.hasUI) {
       onVibeAgentEnd(ctx.ui.setWorkingMessage); // working-vibes internal state + reset message
     }
-  });
-
-  // Dismiss welcome overlay/header on first user message
-  pi.on("user_message", async (_event, ctx) => {
-    dismissWelcome(ctx);
   });
 
   // Command to toggle/configure
@@ -598,8 +551,6 @@ export default function powerlineFooter(pi: ExtensionAPI) {
             currentEditor?.handleInput(data);
             return;
           }
-          // Dismiss welcome overlay/header (use setTimeout to avoid re-entrancy)
-          setTimeout(() => dismissWelcome(ctx), 0);
           originalHandleInput(data);
         };
         
@@ -782,112 +733,4 @@ export default function powerlineFooter(pi: ExtensionAPI) {
     });
   }
 
-  function setupWelcomeHeader(ctx: any) {
-    const modelName = ctx.model?.name || ctx.model?.id || "No model";
-    const providerName = ctx.model?.provider || "Unknown";
-    const loadedCounts = discoverLoadedCounts();
-    const recentSessions = getRecentSessions(3);
-    
-    const header = new WelcomeHeader(modelName, providerName, recentSessions, loadedCounts);
-    welcomeHeaderActive = true; // Will be cleared on first user input
-    
-    ctx.ui.setHeader((_tui: any, _theme: any) => {
-      return {
-        render(width: number): string[] {
-          return header.render(width);
-        },
-        invalidate() {
-          header.invalidate();
-        },
-      };
-    });
-  }
-
-  function setupWelcomeOverlay(ctx: any) {
-    const modelName = ctx.model?.name || ctx.model?.id || "No model";
-    const providerName = ctx.model?.provider || "Unknown";
-    const loadedCounts = discoverLoadedCounts();
-    const recentSessions = getRecentSessions(3);
-    
-    // Small delay to let pi-mono finish initialization
-    setTimeout(() => {
-      // Skip overlay if:
-      // 1. Dismissal was explicitly requested (agent_start/user_message fired)
-      // 2. Agent is already streaming
-      // 3. Session already has assistant messages (agent already responded)
-      if (welcomeOverlayShouldDismiss || isStreaming) {
-        welcomeOverlayShouldDismiss = false;
-        return;
-      }
-      
-      // Check if session already has activity (handles p "command" case)
-      const sessionEvents = ctx.sessionManager?.getBranch?.() ?? [];
-      const hasActivity = sessionEvents.some((e: any) => 
-        (e.type === "message" && e.message?.role === "assistant") ||
-        e.type === "tool_call" ||
-        e.type === "tool_result"
-      );
-      if (hasActivity) {
-        return;
-      }
-      
-      ctx.ui.custom(
-        (tui: any, _theme: any, _keybindings: any, done: (result: void) => void) => {
-          const welcome = new WelcomeComponent(
-            modelName,
-            providerName,
-            recentSessions,
-            loadedCounts,
-          );
-          
-          let countdown = 30;
-          let dismissed = false;
-          
-          const dismiss = () => {
-            if (dismissed) return;
-            dismissed = true;
-            clearInterval(interval);
-            dismissWelcomeOverlay = null;
-            done();
-          };
-          
-          // Store dismiss callback so user_message/keypress can trigger it
-          dismissWelcomeOverlay = dismiss;
-          
-          // Double-check: dismissal might have been requested between the outer check
-          // and this callback running
-          if (welcomeOverlayShouldDismiss) {
-            welcomeOverlayShouldDismiss = false;
-            dismiss();
-          }
-          
-          const interval = setInterval(() => {
-            if (dismissed) return;
-            countdown--;
-            welcome.setCountdown(countdown);
-            tui.requestRender();
-            if (countdown <= 0) dismiss();
-          }, 1000);
-          
-          return {
-            focused: false,
-            invalidate: () => welcome.invalidate(),
-            render: (width: number) => welcome.render(width),
-            handleInput: (_data: string) => dismiss(),
-            dispose: () => {
-              dismissed = true;
-              clearInterval(interval);
-            },
-          };
-        },
-        {
-          overlay: true,
-          overlayOptions: () => ({
-            verticalAlign: "center",
-            horizontalAlign: "center",
-          }),
-        },
-      ).catch(() => {});
-    }, 100);
-  }
 }
